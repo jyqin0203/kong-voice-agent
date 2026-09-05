@@ -13,8 +13,10 @@ ai:
   model:
     api-key: ${AI_API_KEY:xxx}
     base-url: https://dashscope.aliyuncs.com/compatible-mode/v1
-    model-name: ${AI_MODEL_NAME:qwen3.8-max}
-    enable-thinking: ${AI_ENABLE_THINKING:true}
+    router-model-name: ${AI_ROUTER_MODEL:qwen3.8-flash}
+    choice-model-name: ${AI_CHOICE_MODEL:qwen3.7-plus}
+    reasoning-model-name: ${AI_REASONING_MODEL:${AI_MODEL_NAME:qwen3.8-max}}
+    router-timeout-ms: ${AI_ROUTER_TIMEOUT_MS:30000}
 
 kong-voice-agent:
   auth:

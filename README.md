@@ -413,11 +413,12 @@ Windows PowerShell：
 $env:DASHSCOPE_API_KEY="sk-xxxx"
 ```
 
-应用侧 LLM 默认使用百炼 `qwen3.8-max` 并开启深度思考。可通过环境变量覆盖模型或关闭思考：
+应用侧 LLM 会先使用 `qwen3.8-flash` 对最近的用户语音转写做隐藏路由。题面完整且清晰的选择题以及尚未念完的题目使用 `qwen3.7-plus`；包含公式、符号、代码转写歧义的完整题目和编程题使用 `qwen3.8-max`。服务端还会对“念不准、公式、符号、代码、平方、根号、上下标、取模”等线索做本地兜底，避免分类模型低估歧义；路由失败时也会回退到 Max，优先保证答案质量。当前两个答题模型均关闭百炼的显式 thinking 模式，因为 AgentScope 1.0.11 会把该字段并入正文流，导致内部草稿进入字幕与 TTS；Max 模型仍用于更复杂的题目。可通过环境变量覆盖各层模型：
 
 ```powershell
-$env:AI_MODEL_NAME="qwen3.8-max"
-$env:AI_ENABLE_THINKING="true"
+$env:AI_ROUTER_MODEL="qwen3.8-flash"
+$env:AI_CHOICE_MODEL="qwen3.7-plus"
+$env:AI_REASONING_MODEL="qwen3.8-max"
 ```
 
 LLM 的系统提示词位于 `kong-voice-agent-app/src/main/java/io/github/kongweiguang/voice/agent/app/service/AgentService.java` 的 `createAgent()` 方法中，修改 `.sysPrompt(...)` 文本块后需要重新构建并重启后端。

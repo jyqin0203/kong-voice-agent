@@ -15,10 +15,15 @@ import io.agentscope.core.session.InMemorySession;
 import io.agentscope.core.session.Session;
 import io.github.kongweiguang.v1.json.Json;
 import io.github.kongweiguang.voice.agent.app.dto.ChatEvent;
+import io.github.kongweiguang.voice.agent.app.llm.routing.QuestionRoute;
+import io.github.kongweiguang.voice.agent.app.llm.routing.QuestionRoutingService;
 import io.github.kongweiguang.voice.agent.app.util.MsgUtils;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -31,7 +36,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * @author kongweiguang
  */
 @Service
+@Slf4j
+@RequiredArgsConstructor
 public class AgentService {
+    private final QuestionRoutingService questionRoutingService;
+
     /**
      * OpenAI 兼容模型 API Key。
      */
@@ -47,14 +56,14 @@ public class AgentService {
     /**
      * OpenAI 兼容模型名称。
      */
-    @Value("${ai.model.model-name:qwen3.8-max}")
-    private String modelName;
+    @Value("${ai.model.choice-model-name:qwen3.7-plus}")
+    private String choiceModelName;
 
     /**
-     * 是否启用模型深度思考。
+     * 复杂题与编程题使用的强推理模型。
      */
-    @Value("${ai.model.enable-thinking:true}")
-    private boolean enableThinking;
+    @Value("${ai.model.reasoning-model-name:qwen3.8-max}")
+    private String reasoningModelName;
 
     /**
      * AgentScope 会话存储，用于在同一个 voice session 内保留对话记忆。
@@ -70,7 +79,7 @@ public class AgentService {
     /**
      * 创建新的 Agent 实例，并按 voice sessionId 恢复历史状态。
      */
-    private ReActAgent createAgent(String sessionId) {
+    private ReActAgent createAgent(String sessionId, ModelSelection modelSelection) {
         ReActAgent agent = ReActAgent.builder()
                 .name("实时语音做题助手")
                 .sysPrompt("""
@@ -113,24 +122,24 @@ public class AgentService {
                         4. 用户说“下一段”后，只输出紧接上一段的代码，不重复已经展示的内容；最后一段明确说明“代码已完整”。
                         5. 分段期间不要夹入长篇解释，以免破坏代码的连续性。
                         """)
-                .model(getModel())
+                .model(getModel(modelSelection))
                 .memory(new InMemoryMemory())
                 .build();
         agent.loadIfExists(session, sessionId);
         return agent;
     }
 
-    private OpenAIChatModel getModel() {
+    private OpenAIChatModel getModel(ModelSelection modelSelection) {
         // 使用 OpenAI 兼容模型接口，便于替换本地网关、Ollama 代理或云厂商兼容端点。
         return OpenAIChatModel.builder()
                 .apiKey(apiKey)
-                .modelName(modelName)
+                .modelName(modelSelection.modelName())
                 .baseUrl(baseUrl)
                 .httpTransport(OkHttpTransport.builder().build())
                 .formatter(new OpenAIChatFormatter())
                 .generateOptions(
                         GenerateOptions.builder()
-                                .additionalBodyParam("enable_thinking", enableThinking)
+                                .additionalBodyParam("enable_thinking", modelSelection.enableThinking())
                                 .build()
                 )
                 .build();
@@ -140,7 +149,24 @@ public class AgentService {
      * 处理一条已提交的用户输入，并输出可被 LLM 编排器消费的事件流。
      */
     public Flux<ChatEvent> chat(String sessionId, String message) {
-        ReActAgent agent = createAgent(sessionId);
+        return questionRoutingService.route(sessionId, message)
+                .onErrorResume(error -> {
+                    log.warn("题型路由失败，回退强推理模型: sessionId={}, reason={}", sessionId, error.getMessage());
+                    return Mono.just(QuestionRoute.reasoningFallback("router_failed"));
+                })
+                .flatMapMany(route -> chatWithRoute(sessionId, message, route));
+    }
+
+    private Flux<ChatEvent> chatWithRoute(String sessionId, String message, QuestionRoute route) {
+        ModelSelection modelSelection = selectModel(route);
+        log.info("选择答题模型: sessionId={}, questionType={}, complete={}, ambiguity={}, model={}, thinking={}",
+                sessionId,
+                route.questionType(),
+                route.complete(),
+                route.ambiguity(),
+                modelSelection.modelName(),
+                modelSelection.enableThinking());
+        ReActAgent agent = createAgent(sessionId, modelSelection);
         runningAgents.put(sessionId, agent);
 
         // voice pipeline 只在 ASR final 或文本 committed 后调用这里，因此 message 已是本轮最终用户文本。
@@ -169,6 +195,14 @@ public class AgentService {
                 .onErrorResume(error -> Flux.just(ChatEvent.error(error.getMessage()), ChatEvent.complete()));
     }
 
+    private ModelSelection selectModel(QuestionRoute route) {
+        if (route.requiresStrongReasoning()) {
+            // 当前 AgentScope 会把百炼 thinking 内容并入正文；关闭显式 thinking，避免内部草稿进入字幕和 TTS。
+            return new ModelSelection(reasoningModelName, false);
+        }
+        return new ModelSelection(choiceModelName, false);
+    }
+
     /**
      * 尽量保留底层模型事件原貌；序列化失败时退回对象字符串，避免影响主回复链路。
      */
@@ -178,6 +212,9 @@ public class AgentService {
         } catch (Exception ex) {
             return String.valueOf(event);
         }
+    }
+
+    private record ModelSelection(String modelName, boolean enableThinking) {
     }
 
 }
