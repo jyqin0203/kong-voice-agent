@@ -413,6 +413,15 @@ Windows PowerShell：
 $env:DASHSCOPE_API_KEY="sk-xxxx"
 ```
 
+应用侧 LLM 默认使用百炼 `qwen3.8-max` 并开启深度思考。可通过环境变量覆盖模型或关闭思考：
+
+```powershell
+$env:AI_MODEL_NAME="qwen3.8-max"
+$env:AI_ENABLE_THINKING="true"
+```
+
+LLM 的系统提示词位于 `kong-voice-agent-app/src/main/java/io/github/kongweiguang/voice/agent/app/service/AgentService.java` 的 `createAgent()` 方法中，修改 `.sysPrompt(...)` 文本块后需要重新构建并重启后端。
+
 也可以使用项目专用环境变量覆盖：
 
 ```bash
@@ -478,7 +487,7 @@ KONG_VOICE_AGENT_QWEN_API_KEY=sk-xxxx
 
 Qwen ASR Realtime 扩展会为每个语音 turn 建立一个 DashScope SDK 实时会话，`acceptAudio` 将 PCM 分片 Base64 后调用 `appendAudio`，`commitTurn` 在默认 manual 模式下调用 `commit()` 和 `endSession()` 等待最终稿。DashScope Java SDK 2.22.17 的 `OmniRealtimeConfig` 默认会带上 `server_vad`，因此项目在 `enable-turn-detection=false` 时会显式把 `turn_detection` 下发为 `null`，避免上游过早自动断句。DashScope 在最终稿发出后如果再回一个 `connection.closed(code=1000)`，实现会按正常收尾处理；如果 completed 事件文本为空但此前已有 partial，会用最近 partial 兜底；如果 SDK 随后在清理阶段抛出 `conversation is already closed!`，也会被视为幂等关闭，不会覆盖已经拿到的最终转写，也不会阻断后续 `asr_final`、LLM 和 TTS。项目本地已有 VAD / EOU；如需让百炼服务端 VAD 参与断句，可改为 `true`。
 
-应用默认 LLM 提示会要求模型使用用户输入语言回答；用户用中文提问时，应返回自然中文。若替换模型后仍出现中文问题英文回答，优先检查模型能力、对话模板和 `ai.model.model-name` 指向的实际模型。
+应用默认 LLM 提示将 Agent 定义为实时语音做题助手：选择题会等待题干和选项完整后给出简短结论；编程题默认使用 Python 3，先分析思路并确认用户没有疑问后再输出代码，代码只保留少量关键中文注释，并可按实际长度动态分段续写。提示词同时要求模型结合题面修正语音转写中的公式、符号和代码歧义。完整系统提示位于 `AgentService.createAgent()` 的 `.sysPrompt(...)` 文本块；修改后需重新构建并重启应用。
 
 WebSocket JSON 上行消息也可以通过注册 `WsTextMessageHandler` Bean 扩展新的业务 `type`。内置 `ping`、`interrupt`、`audio_end`、`text` 不允许覆盖，以保证公开协议稳定。
 

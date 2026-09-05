@@ -1,5 +1,6 @@
 target/
 node_modules/
+.env
 ui/dist/
 ui/node_modules/
 ui/.vite/
