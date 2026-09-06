@@ -19,7 +19,7 @@ Kong Voice Agent 是一个面向生产场景设计的 Java Voice Agent 后端框
 - 链路指标：按 turn 输出 `turn_metrics`，可直接统计 ASR / LLM / TTS 响应时间、总耗时，以及“说完话到 LLM 首字 / TTS 首包”的时延
 - HTTP / Realtime / SSE / JSON：OpenAI ASR、Qwen ASR、应用侧 AgentScope LLM、OpenAI LLM 扩展、OpenAI TTS、Qwen TTS 和项目协议 JSON 工具统一复用 `kong-http` 与 DashScope Java SDK 提供的请求、实时 WebSocket 和 JSON 能力
 - 打断：支持客户端主动 `interrupt`，也支持 Agent 播报中用户重新说话触发打断
-- React UI：`ui/` 使用 React 19、TypeScript 5.9、Vite 7、React Router 7、Shadcn UI / Radix UI、Tailwind CSS 4、Lucide React 和 pnpm，提供豆包风格的产品化聊天界面、轻量会话侧栏、移动端覆盖式侧栏、底部固定输入、`WS PCM / WebRTC` 传输模式切换、发送/打断一体主按钮、连接、TTS 自动播放和文字区播报动效；每个前端会话拥有独立控制面 WebSocket，多个会话连接可同时存在，切换会话不会断开其他在线会话；会话列表和消息快照会写入浏览器 `localStorage`
+- React UI：`ui/` 使用 React 19、TypeScript 5.9、Vite 7、React Router 7、Shadcn UI / Radix UI、Tailwind CSS 4、Lucide React 和 pnpm，提供豆包风格的产品化聊天界面、轻量会话侧栏、移动端覆盖式侧栏、底部固定输入、`WS PCM / WebRTC` 传输模式切换、发送/打断一体主按钮、电话式连续通话、TTS 自动播放和文字区播报动效；每个前端会话拥有独立控制面 WebSocket，多个会话连接可同时存在，切换会话不会断开其他在线会话；会话列表和消息快照会写入浏览器 `localStorage`
 
 ## 环境要求
 
@@ -119,7 +119,7 @@ http://localhost:5173/
 - `WS PCM`：页面会通过 `ws://localhost:9877/ws/agent?token=<login-token>` 为当前会话建立 WebSocket，并继续使用浏览器本地重采样后的 PCM16 二进制帧上传麦克风音频。
 - `WebRTC`：页面会先连接 `ws://localhost:9877/ws/agent?token=<login-token>`，随后在当前控制面 WebSocket 上发送 `rtc_start`、`rtc_offer` 和 `rtc_ice_candidate` 完成信令协商；麦克风音频改由 `RTCPeerConnection` 直传，TTS 通过远端 RTC 音轨回放；后端会额外通过 `rtc_state_changed` 暴露会话创建、远端音轨绑定、首包音频进入流水线、断流、失败和关闭等关键运行态。
 
-点击“新对话”会创建新的前端会话并为它打开新的后端 session，不会关闭其他仍在线的会话连接。React UI 会把会话列表、当前选中会话、消息快照、`sessionId` 和最近 `turnId` 写入浏览器 `localStorage`，刷新页面后可回看本地历史；切换会话会恢复该会话的本地记录，并在连接仍在线时继续复用原 WebSocket 或 WebRTC 会话。控制面因刷新、断线或手动重连重新建立时，前端会优先带回本地保存的 `sessionId`，把同一对话重新绑定到原后端 session。顶部切换 `WS PCM / WebRTC` 时，会同步更新当前会话的传输模式、关闭旧的音频运行态，并在当前会话已经在线时按新模式自动重连，避免界面模式与真实连接不一致。`WS PCM` 模式下可点击输入框左侧麦克风按钮开始采集，停止录音时自动发送 `audio_end`；如果后端已经通过 `state_changed(USER_TURN_COMMITTED / AGENT_THINKING / AGENT_SPEAKING)` 判定当前轮语音完成，前端也会自动停止本地采集，避免继续上传已结束 turn 的音频。`WebRTC` 模式下浏览器会直接维护麦克风音轨，按钮只负责静音/恢复并在静音时发送一次 `audio_end`。如果 RTC 媒体面进入 `disconnected` 或 `failed`，前端会按退避策略自动尝试最多 3 次恢复当前会话的 RTC 链路；同时页面会根据后端 `rtc_state_changed` 实时刷新“连接错误 / 麦克风状态 / 播放状态”这些调试提示。收到回复后可查看流式 Agent 文本、自动播放 TTS 音频或远端 RTC 音轨、在助手文字区查看播报动效，或切换日间/夜间主题。
+点击“新对话”会创建新的前端会话并为它打开新的后端 session，不会关闭其他仍在线的会话连接。React UI 会把会话列表、当前选中会话、消息快照、`sessionId` 和最近 `turnId` 写入浏览器 `localStorage`，刷新页面后可回看本地历史；切换会话会恢复该会话的本地记录，并在连接仍在线时继续复用原 WebSocket 或 WebRTC 会话。控制面因刷新、断线或手动重连重新建立时，前端会优先带回本地保存的 `sessionId`，把同一对话重新绑定到原后端 session。顶部切换 `WS PCM / WebRTC` 时，会同步更新当前会话的传输模式、关闭旧的音频运行态，并在当前会话已经在线时按新模式自动重连，避免界面模式与真实连接不一致。`WS PCM` 模式下只需点击一次输入框左侧麦克风按钮即可开始连续通话：浏览器持续保留麦克风资源，VAD 检测到用户停顿后自动提交本轮；Agent 思考和本地 TTS 播放期间暂停 PCM 上传，回答播完后自动恢复下一轮聆听，用户再次点击按钮才会结束通话。这样既不需要每轮重新授权或点击，也可避免扬声器回声被识别成用户插话。`WebRTC` 模式下浏览器会直接维护麦克风音轨，按钮负责静音或恢复，并在静音时发送一次 `audio_end`。如果 RTC 媒体面进入 `disconnected` 或 `failed`，前端会按退避策略自动尝试最多 3 次恢复当前会话的 RTC 链路；同时页面会根据后端 `rtc_state_changed` 实时刷新“连接错误 / 麦克风状态 / 播放状态”这些调试提示。收到回复后可查看流式 Agent 文本、自动播放 TTS 音频或远端 RTC 音轨、在助手文字区查看播报动效，或切换日间/夜间主题。
 
 React UI 默认读取：
 

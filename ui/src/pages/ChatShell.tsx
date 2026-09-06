@@ -225,6 +225,14 @@ export function ChatShell() {
   const microphoneProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const microphoneMuteRef = useRef<GainNode | null>(null);
   const recordingRef = useRef(false);
+  /** 连续通话开启后保持麦克风资源存活，直到用户再次点击按钮。 */
+  const continuousCallActiveRef = useRef(false);
+  /** 控制 PCM 是否上传；Agent 思考和播报期间暂停，避免扬声器回声形成错误插话。 */
+  const microphoneUploadEnabledRef = useRef(false);
+  /** 标记当前 Agent 文本是否结束，避免在长回答仍生成时过早恢复监听。 */
+  const assistantTextFinishedRef = useRef(false);
+  /** 延迟恢复监听的定时器，用于吸收相邻 TTS 分片之间的短暂空隙。 */
+  const resumeListeningTimerRef = useRef<number | null>(null);
   const playbackQueueRef = useRef<TtsPlaybackItem[]>([]);
   const playingAudioRef = useRef(false);
   const currentTurnIdRef = useRef<string | null>(null);
@@ -270,7 +278,15 @@ export function ChatShell() {
 
   /** 停止麦克风采集，必要时通知后端提交当前音频 turn。 */
   const stopMicrophone = useCallback((sendAudioEnd: boolean) => {
+    const wasUploading = microphoneUploadEnabledRef.current;
     recordingRef.current = false;
+    continuousCallActiveRef.current = false;
+    microphoneUploadEnabledRef.current = false;
+    assistantTextFinishedRef.current = false;
+    if (resumeListeningTimerRef.current !== null) {
+      window.clearTimeout(resumeListeningTimerRef.current);
+      resumeListeningTimerRef.current = null;
+    }
     setRecording(false);
 
     if (microphoneProcessorRef.current) {
@@ -292,10 +308,12 @@ export function ChatShell() {
     setAudioInputStatus("麦克风未开启");
 
     const socket = activeSocket();
-    if (sendAudioEnd && socket?.readyState === WebSocket.OPEN) {
-      sendWsJson(socket, "audio_end", {});
-      setTurnActive(true);
-      setMessages((current) => [...current, systemMessage("麦克风已停止，已发送 audio_end。")]);
+    if (sendAudioEnd) {
+      if (wasUploading && socket?.readyState === WebSocket.OPEN) {
+        sendWsJson(socket, "audio_end", {});
+        setTurnActive(true);
+      }
+      setMessages((current) => [...current, systemMessage("连续通话已结束。")]);
     }
   }, []);
 
@@ -966,6 +984,46 @@ export function ChatShell() {
     }
   }
 
+  /** 暂停连续通话的 PCM 上传，但保留麦克风权限和音频节点。 */
+  function pauseContinuousListening(status: string) {
+    if (!continuousCallActiveRef.current) {
+      return;
+    }
+    microphoneUploadEnabledRef.current = false;
+    if (resumeListeningTimerRef.current !== null) {
+      window.clearTimeout(resumeListeningTimerRef.current);
+      resumeListeningTimerRef.current = null;
+    }
+    setAudioInputStatus(status);
+  }
+
+  /** Agent 文本和本地 TTS 播放都结束后，自动进入下一轮聆听。 */
+  function scheduleContinuousListeningResume(delayMs = 900) {
+    if (!continuousCallActiveRef.current || !assistantTextFinishedRef.current) {
+      return;
+    }
+    if (resumeListeningTimerRef.current !== null) {
+      window.clearTimeout(resumeListeningTimerRef.current);
+    }
+    resumeListeningTimerRef.current = window.setTimeout(() => {
+      resumeListeningTimerRef.current = null;
+      const socket = activeSocket();
+      if (
+        !continuousCallActiveRef.current ||
+        !assistantTextFinishedRef.current ||
+        playingAudioRef.current ||
+        playbackQueueRef.current.length > 0 ||
+        socket?.readyState !== WebSocket.OPEN
+      ) {
+        return;
+      }
+      assistantTextFinishedRef.current = false;
+      microphoneUploadEnabledRef.current = true;
+      setTurnActive(false);
+      setAudioInputStatus("通话中，正在聆听");
+    }, delayMs);
+  }
+
   /** 处理后端下行事件并映射为聊天消息。 */
   function handleAgentEvent(sessionId: string, event: AgentEventEnvelope) {
     const active = sessionId === activeConversationIdRef.current;
@@ -991,8 +1049,8 @@ export function ChatShell() {
           resolveConversationTransportKind(sessionId) === "ws-pcm" &&
           (state === "USER_TURN_COMMITTED" || state === "AGENT_THINKING" || state === "AGENT_SPEAKING")
         ) {
-          stopMicrophone(false);
-          setAudioInputStatus("本轮语音已提交，等待回复");
+          assistantTextFinishedRef.current = false;
+          pauseContinuousListening("本轮语音已提交，等待回复");
         }
         break;
       }
@@ -1006,6 +1064,13 @@ export function ChatShell() {
         upsertAssistantMessage(sessionId, event, "正在思考...", true);
         break;
       case "agent_text_chunk":
+        if (active && event.payload?.["isLast"] === true) {
+          assistantTextFinishedRef.current = true;
+          if (!playingAudioRef.current && playbackQueueRef.current.length === 0) {
+            // 没有音频返回时仍需恢复监听；若 TTS 随后到达，会取消这次兜底恢复。
+            scheduleContinuousListeningResume(3_000);
+          }
+        }
         appendAssistantChunk(sessionId, event);
         break;
       case "tts_audio_chunk":
@@ -1038,6 +1103,8 @@ export function ChatShell() {
         if (active) {
           setTurnActive(false);
           stopPlayback("当前播报已停止。");
+          assistantTextFinishedRef.current = true;
+          scheduleContinuousListeningResume(300);
         }
         updateConversationMessages(sessionId, (current) => markStreamingDone(current));
         break;
@@ -1045,6 +1112,8 @@ export function ChatShell() {
         if (active) {
           setTurnActive(false);
           stopPlayback("后端返回错误。");
+          assistantTextFinishedRef.current = true;
+          scheduleContinuousListeningResume(300);
         }
         updateConversationMessages(sessionId, (current) => [
           ...markStreamingDone(current),
@@ -1181,6 +1250,8 @@ export function ChatShell() {
       return;
     }
 
+    pauseContinuousListening("回答播报中");
+
     playbackQueueRef.current.push({
       turnId,
       seq: readPayloadNumber(event, "seq", playbackQueueRef.current.length),
@@ -1200,21 +1271,25 @@ export function ChatShell() {
       return;
     }
     playingAudioRef.current = true;
-    while (playbackQueueRef.current.length > 0) {
-      const item = playbackQueueRef.current.shift();
-      if (!item || item.turnId !== currentTurnIdRef.current || invalidTurnIdsRef.current.has(item.turnId)) {
-        continue;
+    try {
+      while (playbackQueueRef.current.length > 0) {
+        const item = playbackQueueRef.current.shift();
+        if (!item || item.turnId !== currentTurnIdRef.current || invalidTurnIdsRef.current.has(item.turnId)) {
+          continue;
+        }
+        setAssistantSpeaking(item.turnId, true);
+        setPlaybackStatus(`正在播放 seq=${item.seq}`);
+        await playTtsAudio(item.audioBase64);
       }
-      setAssistantSpeaking(item.turnId, true);
-      setPlaybackStatus(`正在播放 seq=${item.seq}`);
-      await playTtsAudio(item.audioBase64);
+    } finally {
+      playingAudioRef.current = false;
+      currentAudioSourceRef.current = null;
+      clearSpeakingState();
+      setMessages((current) => markStreamingDone(current));
+      setPlaybackStatus("等待 TTS");
+      setTurnActive(false);
+      scheduleContinuousListeningResume();
     }
-    playingAudioRef.current = false;
-    currentAudioSourceRef.current = null;
-    clearSpeakingState();
-    setMessages((current) => markStreamingDone(current));
-    setPlaybackStatus("等待 TTS");
-    setTurnActive(false);
   }
 
   /** 播放 TTS 音频，优先走浏览器解码，失败时按 PCM16 little-endian 兜底。 */
@@ -1326,7 +1401,7 @@ export function ChatShell() {
     setMessages((current) => [...markStreamingDone(current), systemMessage("已发送打断请求。")]);
   }
 
-  /** 切换麦克风采集状态。 */
+  /** 切换连续通话状态；WS PCM 模式下一次开启后会在多轮问答间自动恢复监听。 */
   async function toggleMicrophone() {
     if (transportKind === "webrtc") {
       const runtime = rtcConnectionsRef.current.get(activeConversationIdRef.current);
@@ -1353,7 +1428,7 @@ export function ChatShell() {
     await startMicrophone();
   }
 
-  /** 打开麦克风并把浏览器音频重采样为后端默认 PCM16 二进制帧。 */
+  /** 打开连续通话并把浏览器音频重采样为后端默认 PCM16 二进制帧。 */
   async function startMicrophone() {
     const currentSocket = activeSocket();
     if (!currentSocket || !connected || recordingRef.current) {
@@ -1382,7 +1457,12 @@ export function ChatShell() {
 
       processor.onaudioprocess = (event) => {
         const socket = activeSocket();
-        if (!recordingRef.current || !socket || socket.readyState !== WebSocket.OPEN) {
+        if (
+          !recordingRef.current ||
+          !microphoneUploadEnabledRef.current ||
+          !socket ||
+          socket.readyState !== WebSocket.OPEN
+        ) {
           return;
         }
         const channel = event.inputBuffer.getChannelData(0);
@@ -1402,9 +1482,12 @@ export function ChatShell() {
       microphoneProcessorRef.current = processor;
       microphoneMuteRef.current = mute;
       recordingRef.current = true;
+      continuousCallActiveRef.current = true;
+      microphoneUploadEnabledRef.current = true;
+      assistantTextFinishedRef.current = false;
       setRecording(true);
-      setAudioInputStatus("正在发送 16kHz PCM");
-      setMessages((current) => [...current, systemMessage("麦克风已开启，正在发送 PCM 音频。")]);
+      setAudioInputStatus("通话中，正在聆听");
+      setMessages((current) => [...current, systemMessage("连续通话已开启；说完后会自动提交，回答结束后会继续聆听。")]);
     } catch (error) {
       setRecording(false);
       recordingRef.current = false;
@@ -1647,7 +1730,7 @@ export function ChatShell() {
                 {connected
                   ? transportKind === "webrtc"
                     ? "WebSocket 控制面 · WebRTC 音频面"
-                    : "WebSocket text · TTS 自动播放"
+                    : "连续通话 · 自动断句与恢复监听"
                   : "当前连接不可用"}
               </span>
             </div>
@@ -1657,7 +1740,7 @@ export function ChatShell() {
                 variant={recording ? "destructive" : "ghost"}
                 size="icon"
                 className="mb-1 shrink-0"
-                title={recording ? "停止录音并提交音频" : "开始麦克风输入"}
+                title={recording ? "结束连续通话" : "开始连续通话"}
                 disabled={!connected}
                 onClick={() => {
                   toggleMicrophone().catch((error: unknown) => {

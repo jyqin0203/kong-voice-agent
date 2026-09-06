@@ -21,7 +21,7 @@
 - HTTP / Realtime / SSE / JSON 基础能力：OpenAI ASR、Qwen ASR、应用侧 AgentScope LLM、OpenAI LLM 扩展、OpenAI TTS、Qwen TTS 和项目协议 JSON 工具已统一复用 `kong-http` 与 DashScope Java SDK 提供的请求、实时 WebSocket 和 JSON 能力。
 - 打断流程：已支持客户端主动 `interrupt` 和用户说话打断播报。
 - Hook 扩展：已提供 `VoicePipelineHook`，可观察音频、文本、turn commit、LLM、TTS 和 interruption 节点。
-- React 联调界面：已提供 `ui/` 产品化聊天界面，支持固定账号登录、`WS PCM / WebRTC` 切换、多会话、本地历史和 TTS 播放。
+- React 联调界面：已提供 `ui/` 产品化聊天界面，支持固定账号登录、`WS PCM / WebRTC` 切换、多会话、本地历史、TTS 播放，以及一次开启后自动断句、等待回答、播完继续监听的电话式连续通话。
 - 文档体系：已建立 README、架构、协议、前端联调、功能索引、进行中清单、路线图和已完成能力文档分工。
 - 基础测试：已覆盖 PCM 工具、Session、TurnManager、文本链路、协议解析、WebRTC 关键回归和部分 OpenAI 适配器边界。
 
