@@ -243,6 +243,36 @@ class QwenStreamingAsrAdapterTest {
                 .hasMessageContaining("空转写结果");
     }
 
+    @Test
+    @DisplayName("上一轮迟到的关闭事件不会提前结束下一轮")
+    void shouldIgnoreLateCloseEventFromPreviousTurn() {
+        FakeRealtimeSessionFactory factory = new FakeRealtimeSessionFactory();
+        QwenStreamingAsrAdapter adapter = newAdapter(factory);
+        adapter.acceptAudio("turn-9", new byte[] {1});
+        FakeRealtimeSession firstSession = factory.session;
+        firstSession.onEnd = () -> firstSession.emit("""
+                {"type":"conversation.item.input_audio_transcription.completed","text":"第一轮"}
+                """);
+        assertThat(adapter.commitTurn("turn-9").transcript()).isEqualTo("第一轮");
+
+        adapter.acceptAudio("turn-10", new byte[] {2});
+        FakeRealtimeSession secondSession = factory.session;
+        firstSession.emit("""
+                {"type":"connection.closed","code":1000,"reason":"late bye"}
+                """);
+        secondSession.emit("""
+                {"type":"conversation.item.input_audio_transcription.text","text":"第二轮"}
+                """);
+
+        Optional<AsrUpdate> partial = adapter.acceptAudio("turn-10", new byte[] {3});
+        assertThat(partial).isPresent();
+        assertThat(partial.orElseThrow().transcript()).isEqualTo("第二轮");
+        secondSession.onEnd = () -> secondSession.emit("""
+                {"type":"conversation.item.input_audio_transcription.completed","text":"第二轮完成"}
+                """);
+        assertThat(adapter.commitTurn("turn-10").transcript()).isEqualTo("第二轮完成");
+    }
+
     /**
      * 创建测试适配器。
      */

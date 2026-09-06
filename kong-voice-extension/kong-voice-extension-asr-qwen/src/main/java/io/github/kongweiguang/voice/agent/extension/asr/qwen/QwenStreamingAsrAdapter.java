@@ -49,6 +49,11 @@ public class QwenStreamingAsrAdapter implements StreamingAsrAdapter {
     private String activeTurnId;
 
     /**
+     * 实时连接代次；旧连接迟到的关闭或转写事件不得污染下一轮。
+     */
+    private long sessionGeneration;
+
+    /**
      * 服务端 partial 事件队列，acceptAudio 返回时按顺序吐给核心流水线。
      */
     private final Deque<AsrUpdate> partialUpdates = new ArrayDeque<>();
@@ -182,7 +187,9 @@ public class QwenStreamingAsrAdapter implements StreamingAsrAdapter {
         partialUpdates.clear();
         finished = new CountDownLatch(1);
         sessionFinished = false;
-        session = sessionFactory.create(properties, format, this::handleEvent);
+        long generation = ++sessionGeneration;
+        String sessionTurnId = turnId;
+        session = sessionFactory.create(properties, format, event -> handleEvent(generation, sessionTurnId, event));
         log.info("Create Qwen ASR realtime session: turnId={}, sampleRate={}, language={}, turnDetectionEnabled={}",
                 turnId, format.sampleRate(), properties.language(), properties.enableTurnDetection());
         session.connect();
@@ -191,8 +198,13 @@ public class QwenStreamingAsrAdapter implements StreamingAsrAdapter {
     /**
      * 解析 Qwen Realtime 服务端事件，转换为项目 ASR partial / final 状态。
      */
-    private void handleEvent(JsonNode event) {
+    private void handleEvent(long generation, String sessionTurnId, JsonNode event) {
         synchronized (monitor) {
+            if (generation != sessionGeneration || !sessionTurnId.equals(activeTurnId)) {
+                log.debug("Ignore stale Qwen ASR event: eventTurnId={}, activeTurnId={}, eventType={}",
+                        sessionTurnId, activeTurnId, event.path("type").asText(""));
+                return;
+            }
             String type = event.path("type").asText("");
             log.info("Receive Qwen ASR event: turnId={}, type={}", activeTurnId, type);
             if (isPartialTranscriptEvent(type)) {
@@ -380,6 +392,8 @@ public class QwenStreamingAsrAdapter implements StreamingAsrAdapter {
      */
     private void closeCurrentSession() {
         synchronized (monitor) {
+            // 先让当前回调失效；SDK close 可能异步补发 connection.closed。
+            sessionGeneration++;
             if (session != null) {
                 try {
                     session.close();

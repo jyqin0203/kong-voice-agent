@@ -572,7 +572,7 @@ $env:DASHSCOPE_API_KEY="sk-xxxx"
 
 默认示例配置会访问 `wss://dashscope.aliyuncs.com/api-ws/v1/realtime`。如果需要切换模型、地域端点或音色，修改 `kong-voice-agent.asr.qwen.*` 和 `kong-voice-agent.tts.qwen.*`。
 
-如果业务模块启用 `kong-voice-extension-asr-qwen`，Qwen ASR 会为每个音频 turn 建立 DashScope SDK 实时识别会话，音频分片通过 `appendAudio` 追加，turn commit 时默认调用 `commit()` 和 `endSession()` 等待最终稿；返回结果仍按本协议下发 `asr_partial` / `asr_final`，不新增客户端消息字段。首个语音 turn 创建时，服务端会把预滚音频窗口一并送入 ASR，避免 VAD 确认说话的延迟截掉短句开头。当前接入 DashScope Java SDK 2.22.17 时，手动提交模式会显式把 `turn_detection` 下发为 `null`，避免 SDK 默认 `server_vad` 提前结束会话。若 completed 事件文本为空但此前已有 partial，实现会使用最近 partial 作为最终稿；若上游在最终稿之后追加 `connection.closed(code=1000)`，实现会按正常会话关闭处理；若 SDK 清理阶段抛出 `conversation is already closed!`，实现同样按幂等关闭处理，不会把这类收尾信号当成识别失败。
+如果业务模块启用 `kong-voice-extension-asr-qwen`，Qwen ASR 会为每个音频 turn 建立 DashScope SDK 实时识别会话，音频分片通过 `appendAudio` 追加，turn commit 时默认调用 `commit()` 和 `endSession()` 等待最终稿；返回结果仍按本协议下发 `asr_partial` / `asr_final`，不新增客户端消息字段。首个语音 turn 创建时，服务端会把预滚音频窗口一并送入 ASR，避免 VAD 确认说话的延迟截掉短句开头。当前接入 DashScope Java SDK 2.22.17 时，手动提交模式会显式把 `turn_detection` 下发为 `null`，避免 SDK 默认 `server_vad` 提前结束会话。若 completed 事件文本为空但此前已有 partial，实现会使用最近 partial 作为最终稿；若上游在最终稿之后追加 `connection.closed(code=1000)`，实现会按正常会话关闭处理；每个实时连接同时绑定独立代次，上一轮延迟到达的关闭或转写事件会被丢弃，不能污染下一轮；若 SDK 清理阶段抛出 `conversation is already closed!`，实现同样按幂等关闭处理，不会把这类收尾信号当成识别失败。
 
 1. 调用 `POST /api/auth/login` 获取 token
 2. 连接 `/ws/agent?token=<login-token>`

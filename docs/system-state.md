@@ -13,7 +13,7 @@
 - Session 与 turn 隔离：已支持独立 `sessionId`、雪花 ID 字符串 `turnId`、旧 turn 失效和异步结果隔离。
 - 音频基础设施：已支持 `AudioFormatSpec` 配置绑定、PCM 工具、ring buffer、pre-roll 和音频标准化入口。
 - VAD：已接入 Silero VAD 扩展，模型缺失时支持 RMS fallback。
-- ASR：已接入 Qwen ASR Realtime 扩展和可选 OpenAI ASR 扩展，当前在 turn commit 或 `audio_end` 后输出最终转写，并可接收真实 partial。
+- ASR：已接入 Qwen ASR Realtime 扩展和可选 OpenAI ASR 扩展，当前在 turn commit 或 `audio_end` 后输出最终转写，并可接收真实 partial；Qwen 实时连接按 turn 代次隔离，上一轮迟到的关闭事件不会提前结束下一轮。
 - EOU 与 TurnManager：已支持 VAD + EOU + endpointing 协同推进 turn committed。
 - LLM 编排：已支持 turn committed 后启动 LLM，当前应用默认使用 app 模块实现，也支持扩展模块方式接入 OpenAI LLM。
 - TTS 编排：已接入 Qwen TTS Realtime 扩展和可选 OpenAI TTS 扩展，支持文本分段累计、实时音频回传和错误下行。
