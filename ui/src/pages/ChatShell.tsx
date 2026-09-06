@@ -1087,6 +1087,13 @@ export function ChatShell() {
         }
         break;
       case "turn_metrics":
+        if (active && readPayloadText(event, "stage") === "llm_completed") {
+          // 部分 LLM 以空文本结束帧收尾，后端只下发 llm_completed，不会再发 isLast 文本块。
+          assistantTextFinishedRef.current = true;
+          if (!playingAudioRef.current && playbackQueueRef.current.length === 0) {
+            scheduleContinuousListeningResume(3_000);
+          }
+        }
         handleTurnMetricsEvent(sessionId, event);
         break;
       case "rtc_ice_candidate":
