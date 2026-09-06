@@ -1,0 +1,31 @@
+[Unit]
+Description=Kong Voice Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=voiceagent
+Group=voiceagent
+WorkingDirectory=/opt/kong-voice-agent
+EnvironmentFile=/opt/kong-voice-agent/.env
+Environment=SERVER_ADDRESS=127.0.0.1
+Environment=SERVER_PORT=9877
+Environment=KONG_VOICE_AGENT_VAD_MODEL_PATH=file:/opt/kong-voice-agent/models/silero_vad.onnx
+Environment=KONG_VOICE_AGENT_EOU_ENABLED=false
+Environment=KONG_VOICE_AGENT_RTC_ENABLED=false
+ExecStart=/usr/bin/java -Xms128m -Xmx512m -XX:MaxMetaspaceSize=192m -XX:MaxDirectMemorySize=128m -XX:+UseG1GC -jar /opt/kong-voice-agent/app.jar
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+MemoryHigh=750M
+MemoryMax=900M
+CPUQuota=150%
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/kong-voice-agent
+
+[Install]
+WantedBy=multi-user.target
