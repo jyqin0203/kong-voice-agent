@@ -126,9 +126,11 @@ React UI 默认读取：
 ```text
 VITE_AGENT_HTTP_BASE=http://localhost:9877
 VITE_AGENT_WS_BASE=ws://localhost:9877
+VITE_DEFAULT_LOGIN_USERNAME=demo
+VITE_DEFAULT_LOGIN_PASSWORD=demo123456
 ```
 
-如需修改后端地址，可复制 `ui/.env.example` 为 `ui/.env.local` 后调整。
+如需修改后端地址或预填登录表单，可复制 `ui/.env.example` 为 `ui/.env.local` 后调整。`VITE_DEFAULT_LOGIN_PASSWORD` 会被编译进公开的前端资源，只能用于明确接受该风险的个人部署，不能替代真正的服务端鉴权。
 
 ## 最小 WebSocket 示例
 

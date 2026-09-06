@@ -162,8 +162,8 @@ interface RtcConversationRuntime {
 
 /** 登录表单初始值。 */
 const DEFAULT_LOGIN_FORM = {
-  username: "demo",
-  password: "demo123456",
+  username: import.meta.env.VITE_DEFAULT_LOGIN_USERNAME ?? "demo",
+  password: import.meta.env.VITE_DEFAULT_LOGIN_PASSWORD ?? "demo123456",
 };
 
 /** 首屏建议问题，帮助用户快速开始本地联调。 */

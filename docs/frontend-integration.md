@@ -78,9 +78,11 @@ http://localhost:5173/
 ```text
 VITE_AGENT_HTTP_BASE=http://localhost:9877
 VITE_AGENT_WS_BASE=ws://localhost:9877
+VITE_DEFAULT_LOGIN_USERNAME=demo
+VITE_DEFAULT_LOGIN_PASSWORD=demo123456
 ```
 
-如果后端端口或域名不同，复制为 `ui/.env.local` 后修改。当前 React UI 已实现固定账号登录、`WS PCM / WebRTC` 传输模式切换、WebSocket 控制面连接、`ping`、`text`、`interrupt`、麦克风 PCM 二进制上传、RTC signaling、停止录音自动 `audio_end`、`asr_final` 用户气泡、`agent_thinking`、`agent_text_chunk` 聚合显示、`tts_audio_chunk` 播放队列和播报动效、`turn_metrics` 摘要展示，以及聊天区顶部固定指标面板，并按 `turnId` 更新当前会话；“新对话”会建立新的后端 session，同时保留其他会话已建立的连接。历史会话只作为浏览器本地快照存储在 `localStorage`，切换历史项时如果对应连接仍在线会继续复用。
+如果后端端口或域名不同，复制为 `ui/.env.local` 后修改。两个 `VITE_DEFAULT_LOGIN_*` 变量只负责预填表单；其中密码会进入浏览器可读取的构建产物，只适用于接受该风险的个人部署。当前 React UI 已实现固定账号登录、`WS PCM / WebRTC` 传输模式切换、WebSocket 控制面连接、`ping`、`text`、`interrupt`、麦克风 PCM 二进制上传、RTC signaling、停止录音自动 `audio_end`、`asr_final` 用户气泡、`agent_thinking`、`agent_text_chunk` 聚合显示、`tts_audio_chunk` 播放队列和播报动效、`turn_metrics` 摘要展示，以及聊天区顶部固定指标面板，并按 `turnId` 更新当前会话；“新对话”会建立新的后端 session，同时保留其他会话已建立的连接。历史会话只作为浏览器本地快照存储在 `localStorage`，切换历史项时如果对应连接仍在线会继续复用。
 
 ## 上行消息
 
